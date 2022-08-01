@@ -1,0 +1,17 @@
+function [cov] = hccme(k,n,bias,ninv,residuals,Xinv,Xi)
+%Heteroscedastic consistent covariance matrix estimator
+%Calculates a HCCME for given data
+%k: number of independent variables
+
+
+sumHCCME = zeros(k,k);
+
+for countHCCME = 1:n
+    sumHCCME = sumHCCME + (residuals(countHCCME)^2)*Xi(:,:,countHCCME);
+end
+
+S0 = ninv*sumHCCME;
+cov = (bias)*(n)*(Xinv)*S0*(Xinv);
+
+end
+

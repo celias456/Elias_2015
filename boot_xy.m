@@ -1,0 +1,57 @@
+function [replication1,replication2] = boot_xy(r,n,y,x1,k,bias,ninv,bhat)
+%Perform XY (pairs) bootstrap
+
+%r: number of bootstrap replications
+%n: sample size
+%y: dependent variable data
+%x1: independent variable data with constant
+%k: number of independent variables
+%bias: n/(n-k)
+%ninv: 1/n
+%bhat: ols estimate of Beta from original data
+
+%Returns 2xr matrix "replication1"
+%replication1(1): ordered vector of bhat*s
+%replication1(2): ordered vector of t statistics
+
+%Returns 1xr matrix "replication2"
+%replication2 : ordered vector of absolute value of t statistics
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%Create storage for bootstrap replication
+replication = zeros(2,r);
+
+
+
+for bootrep = 1:r
+    
+    sample = randsample(n,n,true); %random sample of n observations with replacement
+    
+    y_star = y(sample); %Take random sample with replacement from dependent variable data
+    x1_star = x1(sample,:); %Take random sample with replacement from independent variable data
+    x1inv_star = (x1_star'*x1_star)^-1;
+    
+    bhat_star = x1inv_star * (x1_star'*y_star); %Calculate OLS estimate    
+    residuals_boot = y_star - x1_star*bhat_star; %Calculate residuals
+    
+    %Compute robust standard error
+    cov_star = hccme(k,n,bias,ninv,residuals_boot,x1inv_star,x1_star);
+    se_star = sqrt(cov_star);
+    t_star = (bhat_star(k,1)-bhat(k,1))/se_star(k,k); %bootstrap t-statistic
+
+    replication(1,bootrep) = bhat_star(k,1); %Store bhat*
+    replication(2,bootrep) = t_star; %Store t-stat of bhat*
+    
+    
+end
+
+replication1 = sort(replication,2); %This is used for equal tailed percentile-t CIs
+
+replication2 = abs(replication(2,:)); 
+replication2 = sort(replication2,2); %This is used for symmetrical percentile-t CIs
+
+
+
+end
+

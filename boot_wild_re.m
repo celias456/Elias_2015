@@ -1,0 +1,90 @@
+function [replication1,replication2] = boot_wild_re(type_wild,wtest,f,r,i,k,t,total,residualsi_h,x1bhat,x1inv,x1prime,x1,xi,dof,x1iinv,bhat)
+%Perform Wild Bootstrap
+%type_wild 1 = Rademacher
+%type_wild 2 = Mammen
+
+%type_wild: 1 for Rademacher, 2 for Mammen
+%wtest: .5 for Rademacher, (sqrt(5)+1)/(2*sqrt(5)); for Mammen
+%f: [0,0] for Rademacher, [-(sqrt(5)-1)/2,(sqrt(5)+1)/2]; for Mammen
+%r: number of boostrap replications
+%i: number of cross section members
+%k: number of independent variables in the model
+%t: number of time periods
+%total: i*t
+%residualsi_h: t x i matrix of residuals corrected for
+%heteroscedasticity and small sample bias (row is time, column is
+%cross section member)
+%x1bhat: x1*bhat
+%x1inv: (x1'*x1)^-1
+%x1prime: x1'
+%x1: independent variable data with constant
+%xi: t x i matrix of independent variable data (row is time, column is
+%cross section member)
+%dof: n/(n-1) (used for crcme calculation)
+%x1iinv: outer matrix used in crcme calculation
+%bhat: estimate of slope coefficient from original data
+
+%Returns 2xr matrix "replication1"
+%replication1(1): ordered vector of bhat*s
+%replication1(2): ordered vector of t statistics
+
+%Returns 1xr matrix "replication2"
+%replication2 : ordered vector of absolute value of t statistics
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+%Create storage for bhat*, standard error of bhat*, and t-statistic of
+%bhat*
+replication = zeros(2,r);
+residualsi_star = zeros(t,i);
+
+
+for bootrep = 1:r
+    
+    test = unifrnd(0,1,i,1);
+    
+    %Generate two-point distribution 
+    if type_wild == 1 %Rademacher
+        for count = 1:i
+            if (test(count,1) <= wtest)
+                residualsi_star(:,count) = -residualsi_h(:,count); %perturb all t residuals for cross section member
+            else
+                residualsi_star(:,count) = residualsi_h(:,count); %perturb all t residuals for cross section member
+            end
+        end
+        
+    else %Mammen
+        for count = 1:i
+            if (test(count,1) <= wtest)
+                residualsi_star(:,count) = f(1)*residualsi_h(:,count); %perturb all t residuals for cross section member
+            else 
+                residualsi_star(:,count) = f(2)*residualsi_h(:,count); %perturb all t residuals for cross section member
+            end
+        end
+        
+    end
+    
+    residuals_star = reshape(residualsi_star,total,1); %t*i vector of perturbed residuals
+    y_star = x1bhat+residuals_star; %Calculate dependent variable y*
+    
+    bhat_star = (x1inv)*(x1prime*y_star); %Calculate bhat*
+    residuals_boot = y_star - x1*bhat_star; %Calculate residuals
+    residualsi_boot = reshape(residuals_boot,t,i); %t x i matrix of residuals used in crcme estimator
+    
+    cov_star = crcme(k,i,t,xi,residualsi_boot,dof,x1iinv);
+    se_star = sqrt(cov_star);
+    t_star = (bhat_star(k,1)-bhat(k,1))/se_star(k,k); %bootstrap t-statistic
+    
+    replication(1,bootrep) = bhat_star(k,1); %Store bhat*
+    replication(2,bootrep) = t_star; %Store t-stat of bhat*  
+   
+end
+
+replication1 = sort(replication,2); %This is used for equal tailed percentile-t CIs
+
+replication2 = abs(replication(2,:)); 
+replication2 = sort(replication2,2); %This is used for symmetrical percentile-t CIs
+
+end
+

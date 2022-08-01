@@ -1,0 +1,163 @@
+%Linear model
+
+clear all
+clc;
+
+%% Set Design Parameters and Preliminaries
+n = 180; %Set value for n (number of observations to generate)
+criticalvalue = 1.65346; %Critical value for confidence interval
+type_error_dist = 1; %1 for standard normal error, 2 for student's t error
+type_error_variance = 2; %1 for homoscedasticity, %2 for heteroscedasticity
+type_wild = 1; %1 = Rademacher, 2 = Mammen
+seedstate = 7; %Set seed state
+
+r = 999; %Number of bootstrap repititions
+m = 1000; %Number of monte carlo repititions
+ninv = 1/n;
+
+stream = RandStream('mt19937ar','Seed',seedstate);
+RandStream.setDefaultStream(stream);
+
+Beta = [1;1];  %True value of beta
+k = length(Beta); %Determine the number of independent variables in the model
+
+%Confidence level 
+alpha = .1;
+confidence = 1-alpha;
+low = (alpha/2)*(r+1);
+up = (1-(alpha/2))*(r+1);
+quantile = (1-alpha)*(r+1);
+
+%Wild bootstrap characteristics
+if type_wild == 1
+    wtest = .5;
+    f = [0,0];
+else
+    wtest = (sqrt(5)+1)/(2*sqrt(5));
+    f = [-(sqrt(5)-1)/2,(sqrt(5)+1)/2];
+end
+
+%% Independent variable data
+load xdata.csv 
+x = xdata(1:n,2);
+x1 = xdata(1:n,:);
+x1prime = x1';
+x1inv = (x1'*x1)^-1;
+x1Beta = x1*Beta;
+bias = n/(n-k);
+
+% Perform calculations on X data remove heteroscedasticity and small sample
+% bias
+h = x1*(x1inv)*x1';
+hi = zeros(n,1);
+for count_h = 1:n
+    hi(count_h,1) = sqrt(1-h(count_h,count_h));
+end
+
+%% Error term
+if type_error_dist == 1 %Standard normal error term
+    errormean = 0; %Mean of the error term (Standard normal)
+    errorvariance = 1; %Variance of the error term (Standard normal)
+else %Student's t error term
+    degreesoffreedom = 3; %Degrees of freedom for the student-t distribution
+end
+
+if type_error_variance == 1 %Homoscedasticity
+    sigma = ones(n,1);
+else %Heteroscedasticity
+    sigma = x;
+end
+
+%% Initialize variables for simulation
+
+%Storage for confidence interval bounds (%first row is lower bound, second
+%row is upper bound, third row records if Beta is in ci (1=yes,0=no))
+ci_asy = zeros(3,m); 
+
+ci_xy_percentile = zeros(3,m);
+ci_xy_percentile_t = zeros(3,m);
+ci_xy_percentile_t_2 = zeros(3,m);
+
+ci_residual_percentile = zeros(3,m);
+ci_residual_percentile_t = zeros(3,m);
+
+ci_wild_percentile = zeros(3,m);
+ci_wild_percentile_t = zeros(3,m);
+ci_wild_percentile_t_2 = zeros(3,m);
+
+
+%% Start Monte Carlo Repetitions
+for montecarlocount = 1:m;
+
+%% Generate error term and dependent variable data
+if type_error_dist == 1 %Standard normal
+    e = normrnd(errormean,sqrt(errorvariance),n,1); 
+else %Student's t
+    e = trnd(degreesoffreedom,n,1); 
+end
+y = x1Beta + sigma.*e; %Calculate dependent variable Y
+
+%% Perform ols regression
+bhat = x1inv*(x1prime*y); %Calculate least squares estimates
+x1bhat = x1*bhat;
+residuals = y - x1bhat; %Calculate residuals
+residuals_h = residuals./hi; %Remove small sample bias and heteroscedasticity from residuals
+
+%Calculate robust standard errors
+bhat_cov = hccme(k,n,bias,ninv,residuals,x1inv,x1);
+bhat_se = sqrt(bhat_cov);
+
+%% Asymptotic Confidence Interval
+
+ci_asy(1,montecarlocount) = bhat(k,1) - criticalvalue*bhat_se(k,k); %Beta 1 lower bound
+ci_asy(2,montecarlocount) = bhat(k,1) + criticalvalue*bhat_se(k,k); %Beta 1 upper bound
+
+%Determine if Asymptotic confidence interval contains true Beta 1
+if ((Beta(k,1) >= ci_asy(1,montecarlocount)) && (Beta(k,1) <= ci_asy(2,montecarlocount)))
+    ci_asy(3,montecarlocount) = 1;
+end
+
+%% XY Bootstrap
+
+[replication_xy,replication2_xy] = boot_xy(r,n,y,x1,k,bias,ninv,bhat);
+
+ci_xy_percentile(:,montecarlocount) = percentile(replication_xy,low,up,Beta,k);
+ci_xy_percentile_t(:,montecarlocount) = percentile_t(bhat,k,replication_xy,low,up,bhat_se,Beta);
+ci_xy_percentile_t_2(:,montecarlocount) = percentile_t_2(replication2_xy,quantile,bhat_se,k,bhat,Beta);
+
+
+%% Wild Bootstrap
+
+[replication_wild,replication2_wild] = boot_wild(type_wild,wtest,f,r,n,residuals_h,x1bhat,x1inv,x1prime,x1,k,bias,ninv,bhat);
+
+ci_wild_percentile(:,montecarlocount) = percentile(replication_wild,low,up,Beta,k);
+ci_wild_percentile_t(:,montecarlocount) = percentile_t(bhat,k,replication_wild,low,up,bhat_se,Beta);
+ci_wild_percentile_t_2(:,montecarlocount) = percentile_t_2(replication2_wild,quantile,bhat_se,k,bhat,Beta);
+
+end
+
+%% Find Empirical Coverage Rates
+
+count_ci_asy = sum(ci_asy(3,:));
+
+count_ci_xy_percentile = sum(ci_xy_percentile(3,:));
+count_ci_xy_percentile_t = sum(ci_xy_percentile_t(3,:));
+count_ci_xy_percentile_t_2 = sum(ci_xy_percentile_t_2(3,:));
+
+count_ci_wild_percentile = sum(ci_wild_percentile(3,:));
+count_ci_wild_percentile_t = sum(ci_wild_percentile_t(3,:));
+count_ci_wild_percentile_t_2 = sum(ci_wild_percentile_t_2(3,:));
+
+ec_asy = count_ci_asy/m;
+
+ec_xy_percentile = count_ci_xy_percentile/m;
+ec_xy_percentile_t = count_ci_xy_percentile_t/m;
+ec_xy_percentile_t_2 = count_ci_xy_percentile_t_2/m;
+
+ec_wild_percentile = count_ci_wild_percentile/m;
+ec_wild_percentile_t = count_ci_wild_percentile_t/m;
+ec_wild_percentile_t_2 = count_ci_wild_percentile_t_2/m;
+
+
+empiricalcoverage = struct('n',n,'critical_value',criticalvalue,'asymptotic',ec_asy,'xy_percentile',ec_xy_percentile,'xy_percentile_t',ec_xy_percentile_t,'xy_percentile_t_2',ec_xy_percentile_t_2,'wild_percentile',ec_wild_percentile,'wild_percentile_t',ec_wild_percentile_t,'wild_percentile_t_2',ec_wild_percentile_t_2);
+
